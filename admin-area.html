@@ -1119,7 +1119,13 @@ src="https://www.facebook.com/tr?id=${pixelId}&ev=PageView&noscript=1"
         function editProd(id) { 
             const p = cachedProducts.find(x => x[0] === id); 
             if(!p) return; 
-            document.getElementById('p-id').value = p[0]; 
+            
+            const idInput = document.getElementById('p-id');
+            idInput.value = p[0]; 
+            idInput.readOnly = true;
+            idInput.classList.add('bg-slate-100', 'text-slate-500', 'cursor-not-allowed');
+            idInput.classList.remove('bg-slate-50', 'text-slate-700');
+
             document.getElementById('p-title').value = p[1]; 
             document.getElementById('p-desc').value = p[2]; 
             document.getElementById('p-url').value = p[3]; 
@@ -1318,7 +1324,36 @@ src="https://www.facebook.com/tr?id=${pixelId}&ev=PageView&noscript=1"
             }
         }
 
-        function openProdModal() { document.getElementById('form-prod').reset(); updateProdPreview(''); document.getElementById('p-is-edit').value = 'false'; document.getElementById('modal-prod').classList.remove('hidden'); }
+        function openProdModal() { 
+            document.getElementById('form-prod').reset(); 
+            updateProdPreview(''); 
+            document.getElementById('p-is-edit').value = 'false'; 
+            
+            // Auto-generate Unique ID
+            const prefix = 'PRD';
+            const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+            const timestamp = Date.now().toString().slice(-4);
+            let newId = `${prefix}-${random}${timestamp}`;
+            
+            // Ensure uniqueness against cachedProducts
+            if (typeof cachedProducts !== 'undefined' && Array.isArray(cachedProducts)) {
+                let counter = 1;
+                const originalId = newId;
+                while(cachedProducts.some(p => p[0] === newId)) {
+                    newId = `${originalId}-${counter}`;
+                    counter++;
+                }
+            }
+            
+            const idInput = document.getElementById('p-id');
+            idInput.value = newId;
+            idInput.readOnly = true;
+            // Visual feedback for read-only
+            idInput.classList.add('bg-slate-100', 'text-slate-500', 'cursor-not-allowed');
+            idInput.classList.remove('bg-slate-50', 'text-slate-700');
+            
+            document.getElementById('modal-prod').classList.remove('hidden'); 
+        }
         function openPageModal() { document.getElementById('form-page').reset(); document.getElementById('pg-is-edit').value = 'false'; document.getElementById('modal-page').classList.remove('hidden'); }
         function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
         function logout() { sessionStorage.clear(); localStorage.removeItem(CACHE_KEY_ADMIN); location.reload(); }

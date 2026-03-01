@@ -982,6 +982,13 @@ function saveProduct(d) {
       }
       return { status: "error", message: "ID Produk tidak ditemukan untuk diedit" };
     } else {
+      // Check for duplicate ID before appending
+      const r = s.getDataRange().getValues();
+      for (let i = 1; i < r.length; i++) {
+        if (String(r[i][0]).trim() === String(d.id).trim()) {
+           return { status: "error", message: "ID Produk sudah digunakan. Mohon refresh halaman." };
+        }
+      }
       s.appendRow(dataRow);
       return { status: "success" };
     }
