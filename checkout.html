@@ -8,6 +8,18 @@
             const CACHE_KEY = 'cepat_global_settings';
             const CACHE_AGE = 60 * 60 * 1000; 
 
+            // Global Helper Meta Tags
+            window.setMeta = (attrName, attrValue, content) => {
+                if(!content) return;
+                let element = document.querySelector(`meta[${attrName}="${attrValue}"]`);
+                if (!element) {
+                    element = document.createElement('meta');
+                    element.setAttribute(attrName, attrValue);
+                    document.head.appendChild(element);
+                }
+                element.setAttribute('content', content);
+            };
+
             function applyGlobalSettings(data) {
                 if(data.site_favicon) {
                     let link = document.querySelector("link[rel~='icon']");
@@ -15,34 +27,25 @@
                     link.href = data.site_favicon;
                 }
                 
-                // Helper Meta Tags
-                const setMeta = (attrName, attrValue, content) => {
-                    if(!content) return;
-                    let element = document.querySelector(`meta[${attrName}="${attrValue}"]`);
-                    if (!element) {
-                        element = document.createElement('meta');
-                        element.setAttribute(attrName, attrValue);
-                        document.head.appendChild(element);
-                    }
-                    element.setAttribute('content', content);
-                };
-
                 if(data.site_name) {
-                    document.title = document.title.replace(/Cepat Digital/gi, data.site_name).replace(/Cepat/gi, data.site_name);
-                    setMeta('property', 'og:title', data.site_name);
-                    setMeta('name', 'title', data.site_name);
+                    // Hanya update title jika belum ada judul produk spesifik
+                    if(!window.hasProductTitle) {
+                        document.title = document.title.replace(/Cepat Digital/gi, data.site_name).replace(/Cepat/gi, data.site_name);
+                        window.setMeta('property', 'og:title', data.site_name);
+                        window.setMeta('name', 'title', data.site_name);
+                    }
                 }
 
-                // Tagline -> Meta Description
-                if(data.site_tagline) {
-                    setMeta('property', 'og:description', data.site_tagline);
-                    setMeta('name', 'description', data.site_tagline);
+                // Tagline -> Meta Description (Hanya jika belum ada deskripsi produk)
+                if(data.site_tagline && !window.hasProductDesc) {
+                    window.setMeta('property', 'og:description', data.site_tagline);
+                    window.setMeta('name', 'description', data.site_tagline);
                 }
 
-                // Logo URL -> Meta Image
-                if(data.site_logo) {
-                    setMeta('property', 'og:image', data.site_logo);
-                    setMeta('name', 'image', data.site_logo);
+                // Logo URL -> Meta Image (Hanya jika belum ada gambar produk)
+                if(data.site_logo && !window.hasProductImage) {
+                    window.setMeta('property', 'og:image', data.site_logo);
+                    window.setMeta('name', 'image', data.site_logo);
                 }
 
                 const updateDom = () => {
@@ -424,6 +427,31 @@
             document.getElementById('prod-id').value = p.id;
             document.getElementById('prod-title').value = p.title;
             document.getElementById('prod-price').value = p.harga;
+            
+            // --- UPDATE META TAGS PRODUK ---
+            if(window.setMeta) {
+                // Title
+                document.title = p.title; 
+                window.setMeta('property', 'og:title', p.title);
+                window.setMeta('name', 'title', p.title);
+                window.hasProductTitle = true;
+
+                // Description (Strip HTML & limit)
+                if(p.desc) {
+                    const cleanDesc = p.desc.replace(/<[^>]*>?/gm, '').substring(0, 160);
+                    window.setMeta('property', 'og:description', cleanDesc);
+                    window.setMeta('name', 'description', cleanDesc);
+                    window.hasProductDesc = true;
+                }
+
+                // Image (Priority: image_url > image > thumbnail)
+                const pImage = p.image_url || p.image || p.thumbnail;
+                if(pImage) {
+                    window.setMeta('property', 'og:image', pImage);
+                    window.setMeta('name', 'image', pImage);
+                    window.hasProductImage = true;
+                }
+            }
             
             // LOGIC GRATIS / BERBAYAR
             const isFree = (Number(p.harga) === 0);
