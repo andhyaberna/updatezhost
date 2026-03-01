@@ -1331,8 +1331,10 @@ src="https://www.facebook.com/tr?id=${pixelId}&ev=PageView&noscript=1"
             
             // Auto-generate Unique ID
             const prefix = 'PRD';
-            const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-            const timestamp = Date.now().toString().slice(-4);
+            // 3 random chars (base36)
+            const random = Math.random().toString(36).substring(2, 5).toUpperCase();
+            // 3 last digits of timestamp
+            const timestamp = Date.now().toString().slice(-3);
             let newId = `${prefix}-${random}${timestamp}`;
             
             // Ensure uniqueness against cachedProducts
