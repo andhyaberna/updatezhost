@@ -143,6 +143,8 @@ function doPost(e) {
       case "delete_page": return jsonRes(deletePage(data));
       case "check_slug": return jsonRes(checkSlug(data));
       case "save_affiliate_pixel": return jsonRes(saveAffiliatePixel(data));
+      case "get_admin_orders": return jsonRes(getAdminOrders(data));
+      case "get_admin_users": return jsonRes(getAdminUsers(data));
       case "save_bio_link": return jsonRes(saveBioLink(data));
       case "get_bio_link": return jsonRes(getBioLink(data));
       default: return jsonRes({ status: "error", message: "Aksi tidak terdaftar: " + (action || "unknown") });
@@ -944,11 +946,13 @@ function getAdminData(cfg) {
     return {
       status: "success",
       stats: { users: u.length - 1, orders: o.length - 1, rev: rev },
-      orders: o.slice(1).reverse(),
+      orders: o.slice(1).reverse().slice(0, 20),
       products: p.slice(1),
       pages: pg.slice(1),
       settings: t,
-      users: u.slice(1).reverse()
+      users: u.slice(1).reverse().slice(0, 20),
+      has_more_orders: (o.length - 1) > 20,
+      has_more_users: (u.length - 1) > 20
     };
   } catch (e) {
     return { status: "error", message: e.toString() };
@@ -1747,6 +1751,47 @@ function getBioLink(d) {
 
     return { status: "success", data: null };
   } catch (e) {
+    return { status: "error", message: e.toString() };
+  }
+}
+
+/* =========================
+   PAGINATION ACTIONS
+========================= */
+function getAdminOrders(d) {
+  try {
+    const page = Number(d.page) || 1;
+    const limit = Number(d.limit) || 20;
+    const o = mustSheet_("Orders").getDataRange().getValues();
+    const data = o.slice(1).reverse();
+    const start = (page - 1) * limit;
+    const end = start + limit;
+    
+    return {
+      status: "success",
+      data: data.slice(start, end),
+      has_more: data.length > end
+    };
+  } catch(e) {
+    return { status: "error", message: e.toString() };
+  }
+}
+
+function getAdminUsers(d) {
+  try {
+    const page = Number(d.page) || 1;
+    const limit = Number(d.limit) || 20;
+    const u = mustSheet_("Users").getDataRange().getValues();
+    const data = u.slice(1).reverse();
+    const start = (page - 1) * limit;
+    const end = start + limit;
+    
+    return {
+      status: "success",
+      data: data.slice(start, end),
+      has_more: data.length > end
+    };
+  } catch(e) {
     return { status: "error", message: e.toString() };
   }
 }

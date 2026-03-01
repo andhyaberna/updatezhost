@@ -312,6 +312,11 @@
                                 <tbody id="list-orders" class="divide-y divide-slate-100"></tbody>
                             </table>
                         </div>
+                        <div class="p-6 border-t border-slate-100 text-center hidden" id="more-orders-container">
+                            <button onclick="loadMoreOrders()" id="btn-more-orders" class="text-xs font-bold text-indigo-600 hover:text-indigo-700 uppercase tracking-wider bg-indigo-50 hover:bg-indigo-100 px-6 py-3 rounded-xl transition-all">
+                                Muat Lebih Banyak
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -335,6 +340,11 @@
                                 </thead>
                                 <tbody class="divide-y divide-slate-100"></tbody>
                             </table>
+                        </div>
+                        <div class="p-6 border-t border-slate-100 text-center hidden" id="more-members-container">
+                            <button onclick="loadMoreMembers()" id="btn-more-members" class="text-xs font-bold text-indigo-600 hover:text-indigo-700 uppercase tracking-wider bg-indigo-50 hover:bg-indigo-100 px-6 py-3 rounded-xl transition-all">
+                                Muat Lebih Banyak
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -831,9 +841,12 @@
             } 
         };
 
-        function renderMembers(members) {
+        let currentOrderPage = 1;
+        let currentUserPage = 1;
+
+        function renderMembers(members, append = false) {
             const list = document.getElementById('list-members').getElementsByTagName('tbody')[0];
-            list.innerHTML = '';
+            if(!append) list.innerHTML = '';
             members.forEach(m => {
                 const row = document.createElement('tr');
                 row.className = 'hover:bg-slate-50 transition-colors';
@@ -853,11 +866,9 @@
             });
         }
 
-        function renderAdminUI(r) {
-            renderMembers(r.users || []);
-            cachedPages = r.pages || []; cachedProducts = r.products || [];
-            document.getElementById('stat-orders').innerText = (r.stats.orders || 0) + ' Transaksi'; document.getElementById('stat-rev').innerText = 'Rp ' + Number(r.stats.rev || 0).toLocaleString('id-ID');
-            document.getElementById('list-orders').innerHTML = r.orders.map(o => `
+        function renderOrders(orders, append = false) {
+            const list = document.getElementById('list-orders');
+            const html = orders.map(o => `
                 <tr class="hover:bg-slate-50 transition-colors">
                     <td class="px-8 py-5 font-mono font-bold text-indigo-600 text-xs">${o[0]}</td>
                     <td class="px-8 py-5">
@@ -876,8 +887,62 @@
                     </td>
                 </tr>`).join('');
             
-            document.getElementById('count-prod').innerText = cachedProducts.length; 
+            if(append) list.insertAdjacentHTML('beforeend', html);
+            else list.innerHTML = html;
+        }
+
+        async function loadMoreOrders() {
+            const btn = document.getElementById('btn-more-orders');
+            const oriText = btn.innerText;
+            btn.innerText = 'Loading...'; btn.disabled = true;
+            try {
+                currentOrderPage++;
+                const res = await fetch(SCRIPT_URL, { 
+                    method: 'POST', 
+                    body: JSON.stringify({ action: 'get_admin_orders', page: currentOrderPage, limit: 20 }) 
+                });
+                const r = await res.json();
+                if(r.status === 'success') {
+                    renderOrders(r.data, true);
+                    document.getElementById('more-orders-container').classList.toggle('hidden', !r.has_more);
+                }
+            } catch(e) { console.error(e); }
+            btn.innerText = oriText; btn.disabled = false;
+        }
+
+        async function loadMoreMembers() {
+            const btn = document.getElementById('btn-more-members');
+            const oriText = btn.innerText;
+            btn.innerText = 'Loading...'; btn.disabled = true;
+            try {
+                currentUserPage++;
+                const res = await fetch(SCRIPT_URL, { 
+                    method: 'POST', 
+                    body: JSON.stringify({ action: 'get_admin_users', page: currentUserPage, limit: 20 }) 
+                });
+                const r = await res.json();
+                if(r.status === 'success') {
+                    renderMembers(r.data, true);
+                    document.getElementById('more-members-container').classList.toggle('hidden', !r.has_more);
+                }
+            } catch(e) { console.error(e); }
+            btn.innerText = oriText; btn.disabled = false;
+        }
+
+        function renderAdminUI(r) {
+            currentOrderPage = 1;
+            currentUserPage = 1;
+            renderMembers(r.users || []);
+            renderOrders(r.orders || []);
             
+            document.getElementById('more-orders-container').classList.toggle('hidden', !r.has_more_orders);
+            document.getElementById('more-members-container').classList.toggle('hidden', !r.has_more_users);
+
+            cachedPages = r.pages || []; cachedProducts = r.products || [];
+            document.getElementById('stat-orders').innerText = (r.stats.orders || 0) + ' Transaksi'; document.getElementById('stat-rev').innerText = 'Rp ' + Number(r.stats.rev || 0).toLocaleString('id-ID');
+            
+            document.getElementById('count-prod').innerText = cachedProducts.length; 
+
             document.getElementById('list-products').innerHTML = [...cachedProducts].reverse().map(p => `
                 <div class="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group">
                     <div class="flex justify-between items-start mb-6">
