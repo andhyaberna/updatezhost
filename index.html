@@ -214,7 +214,6 @@
 
                 return `
                 <div class="bg-white p-4 md:p-8 rounded-[1.5rem] md:rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-xl hover:-translate-y-2 transition-all flex flex-col h-full fade-in ${delayClass}">
-                    <div class="mb-3 md:mb-6"><span class="bg-indigo-50 text-indigo-600 px-3 py-1 md:px-4 md:py-1.5 rounded-full text-[8px] md:text-[10px] font-black uppercase tracking-widest">PRODUK PILIHAN</span></div>
                     ${p.image_url ? `<div class="w-full aspect-square rounded-xl md:rounded-2xl overflow-hidden mb-4 md:mb-6 border border-slate-100"><img src="${p.image_url}" class="w-full h-full object-cover transform hover:scale-105 transition-transform duration-500" onerror="this.style.display='none'"></div>` : ''}
                     <h3 class="text-sm md:text-xl font-bold text-slate-800 mb-1 md:mb-2 line-clamp-2">${p.title}</h3>
                     <p class="text-xs md:text-sm text-slate-500 mb-4 md:mb-8 flex-1 line-clamp-3">${p.desc || 'Dapatkan akses eksklusif ke produk berkualitas tinggi yang telah terbukti memberikan hasil.'}</p>
