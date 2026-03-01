@@ -5,7 +5,7 @@
 
     <script>
         (function() {
-            const CACHE_KEY = 'melimpah_global_settings';
+            const CACHE_KEY = 'cepat_global_settings';
             const CACHE_AGE = 60 * 60 * 1000; 
 
             function applyGlobalSettings(data) {
@@ -16,7 +16,7 @@
                 }
                 
                 if(data.site_name) {
-                    document.title = document.title.replace(/Melimpah Digital/gi, data.site_name).replace(/Melimpah/gi, data.site_name);
+                    document.title = document.title.replace(/Cepat Digital/gi, data.site_name).replace(/Cepat/gi, data.site_name);
                 }
 
                 const updateDom = () => {
@@ -54,7 +54,7 @@
     
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Checkout Premium - Melimpah Digital</title>
+    <title>Checkout Premium - Cepat Digital</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -308,7 +308,7 @@
         (function() {
             const urlParams = new URLSearchParams(window.location.search);
             const ref = urlParams.get('ref');
-            if(ref) { localStorage.setItem('melimpah_affiliate', ref); }
+            if(ref) { localStorage.setItem('cepat_affiliate', ref); }
         })();
     </script>
 
@@ -339,10 +339,10 @@
         // Capture Affiliate Ref from URL
         const ref = urlParams.get('ref') || urlParams.get('aff_id');
         if(ref) {
-            localStorage.setItem('melimpah_affiliate', ref);
+            localStorage.setItem('cepat_affiliate', ref);
         }
 
-        const PRODUCT_CACHE_KEY = 'melimpah_product_' + productId;
+        const PRODUCT_CACHE_KEY = 'cepat_product_' + productId;
 
         function selectPayment(method) {
             selectedPayment = method;
@@ -356,7 +356,7 @@
             try {
                 let pxId = sysPayment.pixel_id;
                 if(!pxId) {
-                    const g = JSON.parse(localStorage.getItem('melimpah_global_settings') || '{}');
+                    const g = JSON.parse(localStorage.getItem('cepat_global_settings') || '{}');
                     if(g.data && g.data.pixel_id) pxId = g.data.pixel_id;
                 }
                 if(pxId) {
@@ -425,7 +425,7 @@
         async function loadProduct() {
             if(!productId) { window.location.href = 'index.html'; return; }
             
-            const affId = localStorage.getItem('melimpah_affiliate');
+            const affId = localStorage.getItem('cepat_affiliate');
             const cachedData = localStorage.getItem(PRODUCT_CACHE_KEY);
             let prefilled = false;
 
@@ -436,7 +436,7 @@
             } else {
                 // Pinjam data dari Katalog agar Loading Hitam langsung hilang
                 try {
-                    const pubCat = JSON.parse(localStorage.getItem('melimpah_public_catalog') || '[]');
+                    const pubCat = JSON.parse(localStorage.getItem('cepat_public_catalog') || '[]');
                     const p = pubCat.find(x => x.id === productId);
                     if(p) {
                         document.getElementById('display-title').innerText = p.title;
@@ -522,7 +522,7 @@
                 id_produk: document.getElementById('prod-id').value,
                 nama_produk: document.getElementById('prod-title').value,
                 harga: document.getElementById('prod-price').value,
-                affiliate: localStorage.getItem('melimpah_affiliate') || "-" 
+                affiliate: localStorage.getItem('cepat_affiliate') || "-" 
             };
 
             try {

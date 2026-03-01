@@ -5,7 +5,7 @@
 
     <script>
         (function() {
-            const CACHE_KEY = 'melimpah_global_settings';
+            const CACHE_KEY = 'cepat_global_settings';
             const CACHE_AGE = 60 * 60 * 1000; 
             window.waAdminGlobal = '';
 
@@ -20,7 +20,7 @@
                 
                 // Auto Replace Text di Title Browser
                 if(data.site_name) {
-                    document.title = document.title.replace(/Melimpah Digital/gi, data.site_name).replace(/Melimpah/gi, data.site_name);
+                    document.title = document.title.replace(/Cepat Digital/gi, data.site_name).replace(/Cepat/gi, data.site_name);
                 }
 
                 // Eksekusi DOM HTML (Menyuntikkan Teks ke Halaman)
@@ -158,7 +158,7 @@
     <footer class="bg-white border-t py-12 mt-20">
         <div class="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-8 text-center md:text-left">
             <div>
-                <h3 class="text-xl font-black text-indigo-600 mb-4 dyn-site-name uppercase">MELIMPAH</h3>
+                <h3 class="text-xl font-black text-indigo-600 mb-4 dyn-site-name uppercase">CEPAT</h3>
                 <p class="text-sm text-slate-500 dyn-site-tagline">Platform penyedia produk digital dan kursus online terpercaya di Indonesia.</p>
             </div>
             <div>
@@ -176,13 +176,13 @@
             </div>
         </div>
         <div class="text-center text-xs text-slate-400 mt-12 pt-8 border-t">
-            &copy; 2026 <span class="dyn-site-name">Melimpah Digital</span>. All rights reserved.
+            &copy; 2026 <span class="dyn-site-name">Cepat Digital</span>. All rights reserved.
         </div>
     </footer>
 
     <script>
         // CACHE_KEY katalog tetap di sini
-        const CACHE_KEY_CATALOG = 'melimpah_public_catalog';
+        const CACHE_KEY_CATALOG = 'cepat_public_catalog';
 
         // Fungsi Render HTML Produk
         function renderCatalog(products) {

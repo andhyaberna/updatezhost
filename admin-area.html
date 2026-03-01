@@ -4,7 +4,7 @@
     <script src="config.js?v=2026_1"></script>
     <script>
         (function() {
-            const CACHE_KEY = 'melimpah_global_settings';
+            const CACHE_KEY = 'cepat_global_settings';
             const CACHE_AGE = 60 * 60 * 1000; 
 
             function applyGlobalSettings(data) {
@@ -14,7 +14,7 @@
                     link.href = data.site_favicon;
                 }
                 if(data.site_name) {
-                    document.title = document.title.replace(/Melimpah Digital/gi, data.site_name).replace(/Melimpah/gi, data.site_name);
+                    document.title = document.title.replace(/Cepat Digital/gi, data.site_name).replace(/Cepat/gi, data.site_name);
                 }
                 const updateDomElements = () => {
                     if(data.site_name) {
