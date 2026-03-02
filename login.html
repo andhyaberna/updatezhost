@@ -2,6 +2,8 @@
 <html lang="id">
 <head>
     <script src="config.js?v=2026_1"></script>
+    <link rel="preconnect" href="https://script.google.com" crossorigin>
+    <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
 
     <script>
         (function() {
@@ -228,13 +230,38 @@
                 if(r.status === 'success') {
                     sessionStorage.setItem('user_email', r.data.email);
                     sessionStorage.setItem('user_nama', r.data.nama);
-                    sessionStorage.setItem('user_id', r.data.id); 
-                    
+                    sessionStorage.setItem('user_id', r.data.id);
+
                     showToast("Login Berhasil! Mengalihkan...", "success");
-                    
-                    setTimeout(() => {
+
+                    // Prefetch dashboard data saat user melihat toast
+                    const prefetch = fetch(SCRIPT_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({ action: 'get_dashboard_data', email: r.data.email })
+                    })
+                    .then(pRes => pRes.json())
+                    .then(d => {
+                        if (d.status === 'success' && d.data) {
+                            const combined = {
+                                ...d.data.products,
+                                pages: d.data.pages,
+                                settings: d.data.settings,
+                                user: d.data.user,
+                                affiliate_pixels: d.data.affiliate_pixels
+                            };
+                            localStorage.setItem('cepat_dashboard_data_' + r.data.email, JSON.stringify(combined));
+                            if (d.data.settings) {
+                                localStorage.setItem('cepat_global_settings', JSON.stringify({ data: d.data.settings, time: Date.now() }));
+                            }
+                        }
+                    })
+                    .catch(() => {});
+
+                    // Redirect setelah prefetch selesai ATAU minimal 800ms (toast terlihat)
+                    const minDelay = new Promise(resolve => setTimeout(resolve, 800));
+                    Promise.all([prefetch, minDelay]).then(() => {
                         window.location.href = 'dashboard.html';
-                    }, 1000);
+                    });
                 } else { 
                     showToast(r.message, "error"); 
                     btn.innerHTML = originalText; btn.disabled = false; lucide.createIcons({ root: btn });
