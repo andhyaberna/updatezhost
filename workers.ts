@@ -11,32 +11,34 @@ export default {
       const url = new URL(GAS_URL);
       if (signature) url.searchParams.append('moota_signature', signature);
 
-      // Google Apps Script SELALU redirect 302.
-      // Kita harus ikuti redirect MANUAL sambil tetap kirim POST + body,
-      // karena redirect default (follow) mengubah POST → GET dan body hilang.
-      let targetUrl = url.toString();
-      let response = new Response("No response", { status: 502 });
-      let redirects = 0;
+      // STEP 1: POST ke GAS (redirect: manual)
+      // GAS memproses doPost() di URL ini, lalu return 302
+      const postResponse = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: requestBody,
+        redirect: 'manual'
+      });
 
-      while (redirects < 5) {
-        response = await fetch(targetUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body: requestBody,
-          redirect: 'manual'
-        });
-
-        // Jika bukan redirect, stop
-        if (response.status < 300 || response.status >= 400) break;
-
-        // Ambil URL redirect berikutnya
-        const location = response.headers.get('Location');
-        if (!location) break;
-        targetUrl = location;
-        redirects++;
+      // STEP 2: Ikuti redirect dengan GET untuk ambil response
+      // URL redirect hanya untuk serve hasil doPost(), BUKAN execute ulang
+      if (postResponse.status >= 300 && postResponse.status < 400) {
+        const location = postResponse.headers.get('Location');
+        if (location) {
+          const getResponse = await fetch(location, {
+            method: 'GET',
+            redirect: 'follow'
+          });
+          const gasResult = await getResponse.text();
+          return new Response(gasResult, {
+            status: 200,
+            headers: { 'Content-Type': 'text/plain' }
+          });
+        }
       }
 
-      const gasResult = await response.text();
+      // Jika tidak redirect (langsung 200), return apa adanya
+      const gasResult = await postResponse.text();
       return new Response(gasResult, {
         status: 200,
         headers: { 'Content-Type': 'text/plain' }
