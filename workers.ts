@@ -2,7 +2,7 @@ export default {
   async fetch(request, env, ctx) {
     if (request.method !== 'POST') return new Response('Hanya menerima POST', { status: 405 });
 
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbwNI_QGAfkN5jRydn_o8uU7-ARlr2_6POwg2CIRWy4qbSjYzOgnk9RNvE6Ew-II9II/exec?token=FKtBRIlu";
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbynHJddXlflmcBJdIKPS_j-MrFs_gLz3kqwaIDGTvCKoHKilEfkepEuqCwVllvJadZ4/exec?token=FKtBRIlu";
 
     try {
       const requestBody = await request.text();
