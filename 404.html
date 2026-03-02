@@ -180,7 +180,8 @@
             document.title = data.display_name || 'Bio Link';
             document.getElementById('profile-name').innerText = data.display_name || 'Member';
             document.getElementById('profile-bio').innerText = data.bio || '';
-            document.getElementById('footer-brand').innerText = 'Kelas Jagoan'; 
+            const _cachedBrand = localStorage.getItem(CACHE_SETTINGS);
+            document.getElementById('footer-brand').innerText = _cachedBrand ? (JSON.parse(_cachedBrand).data.site_name || 'Cepat') : 'Cepat';
 
             if (data.photo_url) {
                 document.getElementById('profile-img').src = data.photo_url;

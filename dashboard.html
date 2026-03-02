@@ -555,7 +555,7 @@
             }, 3000);
         }
 
-        const DASHBOARD_CACHE_KEY = 'melimpah_dashboard_data';
+        const DASHBOARD_CACHE_KEY = 'cepat_dashboard_data';
 
         function toggleSidebar() {
             const sb = document.getElementById('sidebar');
@@ -1204,7 +1204,7 @@ src="https://www.facebook.com/tr?id=${pixelId}&ev=PageView&noscript=1"
                         if(r.data.settings) {
                             applyGlobalSettings(r.data.settings);
                             // Update juga cache global settings terpisah agar login page juga dapet update
-                            localStorage.setItem('melimpah_global_settings', JSON.stringify({ data: r.data.settings, time: Date.now() }));
+                            localStorage.setItem('cepat_global_settings', JSON.stringify({ data: r.data.settings, time: Date.now() }));
                         }
                         renderDashboardUI(combinedData);
                     }
