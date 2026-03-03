@@ -98,14 +98,23 @@ function doPost(e) {
       // Validasi Signature (jika moota_secret diset di Settings)
       const mootaSecret = String(getCfgFrom_(cfg, "moota_secret") || "").trim();
       if (mootaSecret) {
-        const signature = (e.parameter && e.parameter.moota_signature) ? String(e.parameter.moota_signature).trim() : "";
-        if (signature) {
-          const computed = Utilities.computeHmacSha256Signature(payloadString, mootaSecret);
-          const computedHex = computed.map(function(chr){return (chr+256).toString(16).slice(-2)}).join("");
-          if (computedHex !== signature) {
-            return ContentService.createTextOutput("ERROR: Invalid Signature")
+        // Cek parameter 'moota_signature' (prioritas) atau 'signature' (fallback)
+        // Cloudflare Worker harus meneruskan header Signature ke query param ini
+        const signature = (e.parameter && (e.parameter.moota_signature || e.parameter.signature)) 
+                          ? String(e.parameter.moota_signature || e.parameter.signature).trim() 
+                          : "";
+        
+        if (!signature) {
+           return ContentService.createTextOutput("ERROR: Missing Signature (moota_secret is set)")
               .setMimeType(ContentService.MimeType.TEXT);
-          }
+        }
+
+        const computed = Utilities.computeHmacSha256Signature(payloadString, mootaSecret);
+        const computedHex = computed.map(function(chr){return (chr+256).toString(16).slice(-2)}).join("");
+        
+        if (computedHex !== signature) {
+          return ContentService.createTextOutput("ERROR: Invalid Signature")
+            .setMimeType(ContentService.MimeType.TEXT);
         }
       }
 
@@ -1514,36 +1523,48 @@ function handleMootaWebhook(mutations, cfg) {
     const s = mustSheet_("Orders");
     const orders = s.getDataRange().getValues();
     const siteName = getCfgFrom_(cfg, "site_name") || "Sistem Premium";
+    const adminWA = getCfgFrom_(cfg, "wa_admin"); // Load once
 
     const MAX_AGE_HOURS = 48;
     const matched = [];
     const debugLog = [];
 
     debugLog.push("MUTATIONS: " + mutations.length);
-    debugLog.push("ORDERS: " + (orders.length - 1));
 
     for (let m = 0; m < mutations.length; m++) {
       const mutasi = mutations[m];
-      const type = String(mutasi.type || "").toLowerCase();
+      const type = String(mutasi.type || "").toUpperCase(); // Moota sends "CR"
 
-      if (type !== "cr" && type !== "credit") {
-        debugLog.push("SKIP mutasi[" + m + "] type=" + type + " (bukan CR)");
+      // Filter Credit only (Uang Masuk)
+      if (type !== "CR" && type !== "CREDIT") {
+        debugLog.push(`SKIP [${m}] Type=${type} (Not CR)`);
         continue;
       }
 
-      const nominalTransfer = parseFloat(String(mutasi.amount || 0).replace(/[^0-9.-]/g, "")) || 0;
+      // Robust Amount Parsing (Handle number or string)
+      let nominalTransfer = 0;
+      if (typeof mutasi.amount === 'number') {
+        nominalTransfer = mutasi.amount;
+      } else {
+        nominalTransfer = parseFloat(String(mutasi.amount || 0).replace(/[^0-9.-]/g, "")) || 0;
+      }
+
       if (nominalTransfer <= 0) {
-        debugLog.push("SKIP mutasi[" + m + "] amount=0");
+        debugLog.push(`SKIP [${m}] Amount=0`);
         continue;
       }
 
-      debugLog.push("CARI MATCH nominal=" + nominalTransfer);
+      debugLog.push(`CHECKING Amount=${nominalTransfer}`);
 
       let foundMatch = false;
+      // Iterate Orders to find match
       for (let i = 1; i < orders.length; i++) {
         const statusOrder = String(orders[i][7] || "").trim();
+        
+        // Hanya proses yang statusnya Pending
         if (statusOrder !== "Pending") continue;
 
+        // Cek umur order (48 jam)
         if (MAX_AGE_HOURS > 0) {
           const dtStr = String(orders[i][8] || "").trim();
           const dt = new Date(dtStr);
@@ -1553,13 +1574,15 @@ function handleMootaWebhook(mutations, cfg) {
           }
         }
 
-        const tagihanOrder = toNumberSafe_(orders[i][6]);
-        debugLog.push("  ROW " + (i+1) + ": tagihan=" + tagihanOrder + " vs transfer=" + nominalTransfer + " match=" + (tagihanOrder == nominalTransfer));
-
-        // Gunakan == (loose) bukan === (strict) untuk handle float vs int
+        const tagihanOrder = toNumberSafe_(orders[i][6]); // Col G (Index 6)
+        
+        // MATCHING LOGIC: Exact Amount (Unique Code included)
         if (tagihanOrder == nominalTransfer) {
+          debugLog.push(`  MATCH FOUND Row ${i+1}: Inv=${orders[i][0]}`);
+          
+          // 1. UPDATE SHEET STATUS
           s.getRange(i + 1, 8).setValue("Lunas");
-          orders[i][7] = "Lunas";
+          orders[i][7] = "Lunas"; // Update local array to prevent double matching if needed
 
           const inv = orders[i][0];
           const uEmail = orders[i][1];
@@ -1568,7 +1591,7 @@ function handleMootaWebhook(mutations, cfg) {
           const pId = orders[i][4];
           const pName = orders[i][5];
 
-          // Cari Link Akses Produk
+          // 2. GET ACCESS URL
           let accessUrl = "";
           const pS = ss.getSheetByName("Access_Rules");
           if (pS) {
@@ -1578,49 +1601,59 @@ function handleMootaWebhook(mutations, cfg) {
             }
           }
 
-          // 1) WA CUSTOMER
+          // 3. SEND NOTIFICATIONS
+          
+          // A) WA Customer
           sendWA(
             uWA,
-            `🎉 *PEMBAYARAN TERVERIFIKASI OTOMATIS!* 🎉\n\nHalo *${uName}*, dana sebesar Rp ${Number(nominalTransfer).toLocaleString('id-ID')} telah berhasil diverifikasi oleh sistem kami.\n\nPesanan Anda untuk produk *${pName}* (Invoice: #${inv}) kini *Telah Aktif*.\n\n🚀 *Klik link berikut untuk mengakses materi Anda:*\n${accessUrl}\n\nTerima kasih atas kepercayaannya!\n*Tim ${siteName}*`,
+            `🎉 *PEMBAYARAN DITERIMA!* 🎉\n\nHalo *${uName}*, pembayaran Anda sebesar Rp ${Number(nominalTransfer).toLocaleString('id-ID')} telah berhasil diverifikasi otomatis.\n\nPesanan *${pName}* (Invoice: #${inv}) kini *AKTIF*.\n\n🚀 *AKSES MATERI:* \n${accessUrl}\n\nTerima kasih!\n*Tim ${siteName}*`,
             cfg
           );
 
-          // 2) EMAIL CUSTOMER
+          // B) Email Customer
           const emailHtml = `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
-                <h2 style="color: #10b981;">Pembayaran Berhasil Diverifikasi! 🚀</h2>
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+                <h2 style="color: #10b981;">Pembayaran Berhasil! ✅</h2>
                 <p>Halo <b>${uName}</b>,</p>
-                <p>Sistem otomatis kami telah memverifikasi pembayaran Anda sebesar <b>Rp ${Number(nominalTransfer).toLocaleString('id-ID')}</b>. Akses produk <b>${pName}</b> Anda sekarang sudah aktif.</p>
+                <p>Pembayaran invoice <b>#${inv}</b> sebesar <b>Rp ${Number(nominalTransfer).toLocaleString('id-ID')}</b> telah diterima.</p>
+                <p>Silakan akses produk <b>${pName}</b> melalui tombol di bawah ini:</p>
                 <div style="text-align: center; margin: 30px 0;">
-                    <a href="${accessUrl}" style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Akses Materi Sekarang</a>
+                    <a href="${accessUrl}" style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Akses Materi</a>
                 </div>
-                <p>Terima kasih atas kepercayaannya!<br><b>Tim ${siteName}</b></p>
+                <p>Terima kasih,<br><b>Tim ${siteName}</b></p>
             </div>`;
-          sendEmail(uEmail, `Akses Terbuka: Pesanan #${inv} - ${siteName}`, emailHtml, cfg);
+          sendEmail(uEmail, `Pembayaran Sukses: #${inv} - ${siteName}`, emailHtml, cfg);
 
-          // 3) WA ADMIN
-          const adminWA = getCfgFrom_(cfg, "wa_admin");
+          // C) WA Admin
           sendWA(
             adminWA,
-            `💰 *AUTO-PAYMENT CLOSING!* 💰\n\nProduk *${pName}* telah terbayar lunas secara OTOMATIS sebesar Rp ${Number(nominalTransfer).toLocaleString('id-ID')}.\n\n👤 Customer: ${uName}\n🔖 Invoice: #${inv}\n✅ Status: Akses otomatis dikirim ke customer 🤖.`,
+            `💰 *MOOTA PAYMENT RECEIVED* 💰\n\nInv: #${inv}\nAmt: Rp ${Number(nominalTransfer).toLocaleString('id-ID')}\nUser: ${uName}\n\nStatus: Auto-Lunas by System.`,
             cfg
           );
 
           foundMatch = true;
           matched.push(inv);
-          break; // stop cari order lain untuk mutasi ini
+          break; // Stop searching orders for this mutation
         }
       }
-      if (!foundMatch) debugLog.push("NO MATCH untuk nominal " + nominalTransfer);
+      if (!foundMatch) debugLog.push(`NO MATCH for Amount=${nominalTransfer}`);
     }
 
     const result = matched.length > 0
-      ? "OK_MATCHED:" + matched.join(",") + " | " + debugLog.join(" | ")
-      : "OK_NO_MATCH | " + debugLog.join(" | ");
-    return ContentService.createTextOutput(result).setMimeType(ContentService.MimeType.TEXT);
+      ? "PROCESSED: " + matched.join(", ")
+      : "NO_MATCHING_ORDER";
+      
+    return ContentService.createTextOutput(JSON.stringify({
+       status: "success", 
+       processed: matched, 
+       logs: debugLog 
+    })).setMimeType(ContentService.MimeType.JSON);
+
   } catch (e) {
-    return ContentService.createTextOutput("ERROR: " + e.toString())
-      .setMimeType(ContentService.MimeType.TEXT);
+    return ContentService.createTextOutput(JSON.stringify({
+       status: "error", 
+       message: e.toString() 
+    })).setMimeType(ContentService.MimeType.JSON);
   }
 }
 
