@@ -215,6 +215,9 @@
                 <button onclick="switchTab('orders')" id="nav-orders" class="nav-item active w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm">
                     <i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard
                 </button>
+                <a href="admin-orders.html" target="_blank" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm text-left">
+                    <i data-lucide="clipboard-list" class="w-5 h-5"></i> Admin Orders
+                </a>
                 <button onclick="switchTab('members')" id="nav-members" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm">
                     <i data-lucide="users" class="w-5 h-5"></i> Data Member
                 </button>
@@ -1000,13 +1003,28 @@
             const syncLabel = document.getElementById('sync-status');
             
             if (cachedDataStr) { 
-                renderAdminUI(JSON.parse(cachedDataStr)); 
+                try {
+                    renderAdminUI(JSON.parse(cachedDataStr)); 
+                } catch(e) { console.error(e); }
+                // Show syncing indicator initially if we have cache, 
+                // but we'll hide it in finally block
                 syncLabel.classList.remove('hidden');
             }
             
             try { 
                 if(typeof SCRIPT_URL === 'undefined') return;
-                const res = await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify({ action: 'get_admin_data' }) }); 
+                
+                // Add timeout for better UX
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                const res = await fetch(SCRIPT_URL, { 
+                    method: 'POST', 
+                    body: JSON.stringify({ action: 'get_admin_data' }),
+                    signal: controller.signal
+                }); 
+                clearTimeout(timeoutId);
+
                 const r = await res.json(); 
                 if(r.status === 'success') { 
                     const freshDataStr = JSON.stringify(r);
@@ -1014,9 +1032,13 @@
                         localStorage.setItem(CACHE_KEY_ADMIN, freshDataStr); 
                         renderAdminUI(r); 
                     }
-                    syncLabel.classList.add('hidden');
                 } 
-            } catch (err) { console.error(err); }
+            } catch (err) { 
+                console.error("Sync error:", err); 
+            } finally {
+                // Ensure sync label is always hidden after attempt
+                syncLabel.classList.add('hidden');
+            }
         }
 
         function forceSync() { 
