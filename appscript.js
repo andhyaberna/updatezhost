@@ -357,6 +357,24 @@ function logWA_(status, target, detail) {
 /* =========================
    NOTIFICATIONS
 ========================= */
+
+/**
+ * Normalize Indonesian phone number for Fonnte API.
+ * Strips non-digits, handles +62/62/0 prefix variations.
+ * Returns clean number like "81234567890" (without country code prefix).
+ */
+function normalizePhone_(raw) {
+  if (!raw) return "";
+  // Remove all non-digit characters (+, -, spaces, parens, etc)
+  let num = String(raw).replace(/[^0-9]/g, "");
+  // Handle country code prefix
+  if (num.startsWith("620")) num = num.substring(3); // 6208xxx → 8xxx
+  else if (num.startsWith("62")) num = num.substring(2); // 628xxx → 8xxx
+  // Remove leading 0 if present
+  if (num.startsWith("0")) num = num.substring(1); // 08xxx → 8xxx
+  return num;
+}
+
 function sendWA(target, message, cfg) {
   if (!target) {
     logWA_("SKIP", "(empty)", "No target number provided");
@@ -369,8 +387,13 @@ function sendWA(target, message, cfg) {
     return { success: false, reason: "no_fonnte_token" };
   }
 
-  // Clean target number: remove spaces, ensure no leading 0 issues
-  const cleanTarget = String(target).replace(/\s+/g, "").trim();
+  // Normalize phone number: strip all non-digits, handle prefix
+  const cleanTarget = normalizePhone_(target);
+  if (!cleanTarget || cleanTarget.length < 9) {
+    logWA_("INVALID_NUMBER", String(target), "After normalization: '" + cleanTarget + "' (too short or empty)");
+    return { success: false, reason: "invalid_phone_number" };
+  }
+
   const MAX_RETRIES = 2;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -378,7 +401,11 @@ function sendWA(target, message, cfg) {
       const res = UrlFetchApp.fetch("https://api.fonnte.com/send", {
         method: "post",
         headers: { "Authorization": token },
-        payload: { target: cleanTarget, message: message },
+        payload: {
+          target: cleanTarget,
+          message: message,
+          countryCode: "62"
+        },
         muteHttpExceptions: true
       });
 
@@ -396,7 +423,7 @@ function sendWA(target, message, cfg) {
             // Fonnte returned 200 but status=false (invalid number, quota, etc)
             const reason = String(resJson.reason || resJson.detail || resJson.message || "Unknown").substring(0, 200);
             if (attempt >= MAX_RETRIES) {
-              logWA_("REJECTED", cleanTarget, "Fonnte rejected: " + reason);
+              logWA_("REJECTED", cleanTarget, "Fonnte rejected: " + reason + " | Raw response: " + resText.substring(0, 200));
               return { success: false, reason: reason };
             }
           }
@@ -487,6 +514,13 @@ function createOrder(d, cfg) {
     const email = String(d.email || "").trim().toLowerCase();
     if (!email) return { status: "error", message: "Email wajib diisi" };
 
+    // Normalize WhatsApp number at storage time
+    const waRaw = String(d.whatsapp || "").trim();
+    const waNormalized = normalizePhone_(waRaw);
+    if (waRaw && !waNormalized) {
+      Logger.log("WARNING: WA number normalization failed for: " + waRaw);
+    }
+
     const siteName = getCfgFrom_(cfg, "site_name") || "Sistem Premium";
     const siteUrl = String(getCfgFrom_(cfg, "site_url") || "").trim();
     const loginUrl = siteUrl ? (siteUrl + "/login.html") : "Link Login Belum Disetting";
@@ -557,7 +591,7 @@ function createOrder(d, cfg) {
       inv,
       email,
       d.nama,
-      d.whatsapp,
+      waNormalized || waRaw,
       d.id_produk,
       d.nama_produk,
       hargaTotalUnik,
