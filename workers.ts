@@ -5,18 +5,30 @@ export default {
       return new Response('Method Not Allowed', { status: 405 });
     }
 
-    // 2. URL Google Apps Script (Pastikan URL ini benar)
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbxJV9gJPLZn46o53RI47AG-L3jpPNUO4Onn6zwfMXHQAMNS8XqrhVNCdTYVw9WONoO7/exec";
+    // 2. URL Google Apps Script dari Environment Variables
+    // Set via Cloudflare Workers Dashboard > Settings > Variables
+    const GAS_URL = env.GAS_URL;
+    if (!GAS_URL) {
+      return new Response(JSON.stringify({ status: "error", message: "GAS_URL not configured" }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
     
-    // Token keamanan tambahan (opsional, tapi ada di URL asli Anda)
-    const SECRET_TOKEN = "FKtBRIlu"; 
+    // Token keamanan dari Environment Variables
+    const SECRET_TOKEN = env.SECRET_TOKEN;
+    if (!SECRET_TOKEN) {
+      return new Response(JSON.stringify({ status: "error", message: "SECRET_TOKEN not configured" }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
 
     try {
       // 3. Ambil Signature dari Header Moota
       const signature = request.headers.get("Signature") || "";
 
       // 4. Siapkan URL Tujuan dengan Parameter Signature
-      // Kita tempelkan signature sebagai query param agar bisa dibaca oleh GAS (e.parameter.moota_signature)
       const targetUrl = new URL(GAS_URL);
       targetUrl.searchParams.append("token", SECRET_TOKEN);
       targetUrl.searchParams.append("moota_signature", signature);
@@ -28,7 +40,7 @@ export default {
       const response = await fetch(targetUrl.toString(), {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json', // Pastikan dikirim sebagai JSON
+          'Content-Type': 'application/json',
         },
         body: requestBody
       });

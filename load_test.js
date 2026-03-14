@@ -1,9 +1,16 @@
 const https = require('https');
 
-// CONFIG
-const TARGET_URL = 'https://script.google.com/macros/s/AKfycbzbZ2uVuN1kr93pP-f8k5sTBK6ZlV8LbIx2HuYI4ufKqz7d9NL6HcnNqyFk7Gs6TANp/exec'; // Use the latest URL found
-const TOTAL_REQUESTS = 50;
-const CONCURRENCY = 5;
+// CONFIG — Use environment variables for security
+// Usage: TARGET_URL=https://your-gas-url.com/exec node load_test.js
+const TARGET_URL = process.env.TARGET_URL;
+if (!TARGET_URL) {
+  console.error('ERROR: TARGET_URL environment variable is required.');
+  console.error('Usage: TARGET_URL=https://script.google.com/macros/s/.../exec node load_test.js');
+  process.exit(1);
+}
+
+const TOTAL_REQUESTS = parseInt(process.env.TOTAL_REQUESTS || '50', 10);
+const CONCURRENCY = parseInt(process.env.CONCURRENCY || '5', 10);
 
 const results = {
     success: 0,
@@ -32,13 +39,12 @@ async function makeRequest(id) {
                 const duration = Date.now() - start;
                 results.times.push(duration);
                 if (res.statusCode >= 200 && res.statusCode < 300) {
-                    // Check if GAS returned error in JSON
                     try {
                         const json = JSON.parse(body);
                         if(json.status === 'success') results.success++;
                         else results.failed++;
                     } catch(e) {
-                        results.failed++; // HTML error page from Google
+                        results.failed++;
                     }
                 } else {
                     results.failed++;
@@ -61,7 +67,7 @@ async function makeRequest(id) {
 
 async function runLoadTest() {
     console.log(`Starting Load Test: ${TOTAL_REQUESTS} requests, ${CONCURRENCY} concurrency`);
-    console.log(`Target: ${TARGET_URL}`);
+    console.log(`Target: ${TARGET_URL.substring(0, 50)}...`); // Don't log full URL
     
     const queue = Array.from({ length: TOTAL_REQUESTS }, (_, i) => i + 1);
     const active = [];

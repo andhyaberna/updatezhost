@@ -244,8 +244,12 @@
     </div>
 
     <script>
-        // CONFIGURATION
-        const API_URL = typeof SCRIPT_URL !== 'undefined' ? SCRIPT_URL : "https://script.google.com/macros/s/AKfycbzbZ2uVuN1kr93pP-f8k5sTBK6ZlV8LbIx2HuYI4ufKqz7d9NL6HcnNqyFk7Gs6TANp/exec";
+        // CONFIGURATION — Loaded from encrypted config.js
+        if (typeof SCRIPT_URL === 'undefined') {
+            console.error('[Security] config.js gagal dimuat. SCRIPT_URL tidak tersedia.');
+            document.body.innerHTML = '<div style="text-align:center;padding:50px;color:#ef4444;"><h2>⚠️ Konfigurasi Error</h2><p>Gagal memuat konfigurasi sistem. Silakan refresh halaman.</p></div>';
+        }
+        const API_URL = typeof SCRIPT_URL !== 'undefined' ? SCRIPT_URL : null;
         let currentPage = 1;
         let currentData = [];
         let isEditing = false;
