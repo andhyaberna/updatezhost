@@ -1,18 +1,13 @@
 // Cloudflare Pages Advanced Mode Worker
-// Handles webhook routes, passes everything else to static assets
+// Handles POST /webhook/moota, passes everything else to static assets
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // Route: POST /webhook/moota → GAS endpoint A
+    // Route: POST /webhook/moota → Google Apps Script
     if (url.pathname === '/webhook/moota' && request.method === 'POST') {
       return handleWebhook(request, env.MOOTA_GAS_URL, env.MOOTA_TOKEN);
-    }
-
-    // Route: POST /webhook/moota2 → GAS endpoint B
-    if (url.pathname === '/webhook/moota2' && request.method === 'POST') {
-      return handleWebhook(request, env.MOOTA2_GAS_URL, env.MOOTA2_TOKEN);
     }
 
     // Everything else → pass to static assets
