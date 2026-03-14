@@ -196,6 +196,14 @@ function doPost(e) {
       case "get_admin_users": return jsonRes(getAdminUsers(data));
       case "save_bio_link": return jsonRes(saveBioLink(data));
       case "get_bio_link": return jsonRes(getBioLink(data));
+
+      // DIAGNOSTIC & MONITORING ACTIONS
+      case "get_email_logs": return jsonRes(getEmailLogs_());
+      case "get_moota_logs": return jsonRes(getMootaLogs_());
+      case "test_email": return jsonRes(testEmailDelivery(data));
+      case "get_system_health": return jsonRes(getSystemHealth());
+      case "get_email_quota": return jsonRes(getEmailQuotaStatus());
+
       default: return jsonRes({ status: "error", message: "Aksi tidak terdaftar: " + (action || "unknown") });
     }
   } catch (err) {
@@ -295,6 +303,41 @@ function getIkFiles(cfg) {
 }
 
 /* =========================
+   LOGGING HELPERS
+========================= */
+function logEmail_(status, to, subject, detail) {
+  try {
+    let s = ss.getSheetByName("Email_Logs");
+    if (!s) {
+      s = ss.insertSheet("Email_Logs");
+      s.appendRow(["Timestamp", "Status", "To", "Subject", "Detail"]);
+      s.setFrozenRows(1);
+    }
+    s.appendRow([new Date(), status, to, subject, String(detail).substring(0, 500)]);
+    // Auto-trim: keep max 500 rows
+    if (s.getLastRow() > 500) s.deleteRows(2, s.getLastRow() - 500);
+  } catch (e) {
+    Logger.log("logEmail_ error: " + e);
+  }
+}
+
+function logMoota_(type, detail) {
+  try {
+    let s = ss.getSheetByName("Moota_Logs");
+    if (!s) {
+      s = ss.insertSheet("Moota_Logs");
+      s.appendRow(["Timestamp", "Type", "Detail"]);
+      s.setFrozenRows(1);
+    }
+    s.appendRow([new Date(), type, String(detail).substring(0, 1000)]);
+    // Auto-trim: keep max 500 rows
+    if (s.getLastRow() > 500) s.deleteRows(2, s.getLastRow() - 500);
+  } catch (e) {
+    Logger.log("logMoota_ error: " + e);
+  }
+}
+
+/* =========================
    NOTIFICATIONS
 ========================= */
 function sendWA(target, message, cfg) {
@@ -315,14 +358,49 @@ function sendWA(target, message, cfg) {
 }
 
 function sendEmail(target, subject, body, cfg) {
-  if (!target) return;
+  if (!target) return { success: false, reason: "no_target" };
   cfg = cfg || getSettingsMap_();
-  try {
-    const senderName = getCfgFrom_(cfg, "site_name") || "Admin Sistem";
-    MailApp.sendEmail({ to: target, subject: subject, htmlBody: body, name: senderName });
-  } catch (e) {
-    Logger.log(e);
+
+  // Check daily quota first
+  const remaining = MailApp.getRemainingDailyQuota();
+  if (remaining <= 0) {
+    logEmail_("QUOTA_EXCEEDED", target, subject, "Daily email quota exceeded (remaining: " + remaining + ")");
+    // Fallback: alert admin via WA
+    const adminWA = getCfgFrom_(cfg, "wa_admin");
+    if (adminWA) {
+      sendWA(adminWA, "⚠️ *EMAIL QUOTA HABIS!*\n\nEmail ke " + target + " GAGAL terkirim karena quota harian habis.\nSubject: " + subject, cfg);
+    }
+    return { success: false, reason: "quota_exceeded" };
   }
+
+  const senderName = getCfgFrom_(cfg, "site_name") || "Admin Sistem";
+  const MAX_RETRIES = 3;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      MailApp.sendEmail({ to: target, subject: subject, htmlBody: body, name: senderName });
+      logEmail_("SENT", target, subject, "OK (attempt " + attempt + ", quota left: " + (remaining - 1) + ")");
+      return { success: true };
+    } catch (e) {
+      Logger.log("sendEmail attempt " + attempt + " failed: " + e);
+      if (attempt < MAX_RETRIES) {
+        Utilities.sleep(1000 * attempt); // Exponential backoff: 1s, 2s
+      } else {
+        logEmail_("FAILED", target, subject, e.toString());
+        // Fallback: alert admin via WA
+        const adminWA = getCfgFrom_(cfg, "wa_admin");
+        if (adminWA) {
+          sendWA(adminWA, "❌ *EMAIL GAGAL TERKIRIM!*\n\nKe: " + target + "\nSubject: " + subject + "\nError: " + String(e).substring(0, 200), cfg);
+        }
+        return { success: false, reason: e.toString() };
+      }
+    }
+  }
+}
+
+function getEmailQuotaStatus() {
+  const remaining = MailApp.getRemainingDailyQuota();
+  return { status: "success", remaining: remaining, limit: 100, warning: remaining < 10 };
 }
 
 /* =========================
@@ -1421,7 +1499,6 @@ function normalizeUsersSheet() {
 }
 
 
-
 /* =========================
    AUTO-PAYMENT SYSTEM (MOOTA WEBHOOK)
 ========================= */
@@ -1429,12 +1506,15 @@ function handleMootaWebhook(mutations, cfg) {
   try {
     cfg = cfg || getSettingsMap_();
 
+    // LOG: Raw incoming webhook for debugging
+    logMoota_("WEBHOOK_IN", "Mutations count: " + mutations.length + " | Data: " + JSON.stringify(mutations).substring(0, 800));
+
     const s = mustSheet_("Orders");
     const orders = s.getDataRange().getValues();
     const siteName = getCfgFrom_(cfg, "site_name") || "Sistem Premium";
-    const adminWA = getCfgFrom_(cfg, "wa_admin"); // Load once
+    const adminWA = getCfgFrom_(cfg, "wa_admin");
 
-    const MAX_AGE_HOURS = 48;
+    const MAX_AGE_HOURS = 72; // Extended from 48 to 72 hours for better matching
     const matched = [];
     const debugLog = [];
 
@@ -1442,11 +1522,12 @@ function handleMootaWebhook(mutations, cfg) {
 
     for (let m = 0; m < mutations.length; m++) {
       const mutasi = mutations[m];
-      const type = String(mutasi.type || "").toUpperCase(); // Moota sends "CR"
+      const type = String(mutasi.type || "").toUpperCase();
 
       // Filter Credit only (Uang Masuk)
       if (type !== "CR" && type !== "CREDIT") {
         debugLog.push(`SKIP [${m}] Type=${type} (Not CR)`);
+        logMoota_("SKIP_TYPE", "Mutation " + m + " type=" + type + " (not CR/CREDIT)");
         continue;
       }
 
@@ -1457,15 +1538,21 @@ function handleMootaWebhook(mutations, cfg) {
       } else {
         nominalTransfer = parseFloat(String(mutasi.amount || 0).replace(/[^0-9.-]/g, "")) || 0;
       }
+      // Round to integer to avoid floating point issues
+      nominalTransfer = Math.round(nominalTransfer);
 
       if (nominalTransfer <= 0) {
         debugLog.push(`SKIP [${m}] Amount=0`);
+        logMoota_("SKIP_ZERO", "Mutation " + m + " amount=0 or negative");
         continue;
       }
 
-      debugLog.push(`CHECKING Amount=${nominalTransfer}`);
+      debugLog.push(`CHECKING Amount=${nominalTransfer} Desc=${String(mutasi.description || "").substring(0, 100)}`);
 
       let foundMatch = false;
+      // Collect pending orders info for debugging if no match
+      let pendingOrders = [];
+
       // Iterate Orders to find match
       for (let i = 1; i < orders.length; i++) {
         const statusOrder = String(orders[i][7] || "").trim();
@@ -1473,7 +1560,7 @@ function handleMootaWebhook(mutations, cfg) {
         // Hanya proses yang statusnya Pending
         if (statusOrder !== "Pending") continue;
 
-        // Cek umur order (48 jam)
+        // Cek umur order
         if (MAX_AGE_HOURS > 0) {
           const dtStr = String(orders[i][8] || "").trim();
           const dt = new Date(dtStr);
@@ -1483,15 +1570,17 @@ function handleMootaWebhook(mutations, cfg) {
           }
         }
 
-        const tagihanOrder = toNumberSafe_(orders[i][6]); // Col G (Index 6)
+        const tagihanOrder = Math.round(toNumberSafe_(orders[i][6])); // Round to integer
+        pendingOrders.push({ inv: orders[i][0], tagihan: tagihanOrder });
         
-        // MATCHING LOGIC: Exact Amount (Unique Code included)
-        if (tagihanOrder == nominalTransfer) {
+        // MATCHING LOGIC: Exact Amount (Rounded integers)
+        if (tagihanOrder === nominalTransfer) {
           debugLog.push(`  MATCH FOUND Row ${i+1}: Inv=${orders[i][0]}`);
+          logMoota_("MATCH", "Inv=" + orders[i][0] + " Amount=" + nominalTransfer + " Row=" + (i+1));
           
           // 1. UPDATE SHEET STATUS
           s.getRange(i + 1, 8).setValue("Lunas");
-          orders[i][7] = "Lunas"; // Update local array to prevent double matching if needed
+          orders[i][7] = "Lunas"; // Prevent double matching
 
           const inv = orders[i][0];
           const uEmail = orders[i][1];
@@ -1536,7 +1625,7 @@ function handleMootaWebhook(mutations, cfg) {
           // C) WA Admin
           sendWA(
             adminWA,
-            `💰 *MOOTA PAYMENT RECEIVED* 💰\n\nInv: #${inv}\nAmt: Rp ${Number(nominalTransfer).toLocaleString('id-ID')}\nUser: ${uName}\n\nStatus: Auto-Lunas by System.`,
+            `💰 *MOOTA PAYMENT RECEIVED* 💰\n\nInv: #${inv}\nAmt: Rp ${Number(nominalTransfer).toLocaleString('id-ID')}\nUser: ${uName}\nProduk: ${pName}\n\nStatus: Auto-Lunas by System.`,
             cfg
           );
 
@@ -1545,12 +1634,27 @@ function handleMootaWebhook(mutations, cfg) {
           break; // Stop searching orders for this mutation
         }
       }
-      if (!foundMatch) debugLog.push(`NO MATCH for Amount=${nominalTransfer}`);
+
+      if (!foundMatch) {
+        const pendingInfo = pendingOrders.map(o => o.inv + "=" + o.tagihan).join(", ");
+        debugLog.push(`NO MATCH for Amount=${nominalTransfer} | Pending orders: ${pendingInfo}`);
+        logMoota_("NO_MATCH", "Amount=" + nominalTransfer + " | Desc=" + String(mutasi.description || "").substring(0, 200) + " | Pending orders: " + pendingInfo);
+        
+        // Alert admin about unmatched payment (only for significant amounts)
+        if (adminWA && nominalTransfer >= 10000) {
+          sendWA(
+            adminWA,
+            `⚠️ *UNMATCHED PAYMENT* ⚠️\n\nTransfer masuk Rp ${Number(nominalTransfer).toLocaleString('id-ID')} dari Moota TIDAK COCOK dengan order manapun.\n\nDeskripsi: ${String(mutasi.description || "-").substring(0, 100)}\n\nPending Orders:\n${pendingOrders.length > 0 ? pendingOrders.slice(0, 5).map(o => "• " + o.inv + " = Rp " + Number(o.tagihan).toLocaleString('id-ID')).join("\n") : "(tidak ada order pending)"}\n\nMohon cek manual di dashboard.`,
+            cfg
+          );
+        }
+      }
     }
 
-    const result = matched.length > 0
+    const resultSummary = matched.length > 0
       ? "PROCESSED: " + matched.join(", ")
       : "NO_MATCHING_ORDER";
+    logMoota_("RESULT", resultSummary + " | Logs: " + debugLog.join(" | "));
       
     return ContentService.createTextOutput(JSON.stringify({
        status: "success", 
@@ -1559,6 +1663,7 @@ function handleMootaWebhook(mutations, cfg) {
     })).setMimeType(ContentService.MimeType.JSON);
 
   } catch (e) {
+    logMoota_("ERROR", e.toString());
     return ContentService.createTextOutput(JSON.stringify({
        status: "error", 
        message: e.toString() 
@@ -1758,6 +1863,165 @@ function getAdminUsers(d) {
       has_more: data.length > end
     };
   } catch(e) {
+    return { status: "error", message: e.toString() };
+  }
+}
+
+/* =========================
+   DIAGNOSTIC & TEST FUNCTIONS
+========================= */
+function getEmailLogs_() {
+  try {
+    const s = ss.getSheetByName("Email_Logs");
+    if (!s || s.getLastRow() <= 1) return { status: "success", data: [], message: "No email logs yet" };
+    const data = s.getDataRange().getValues();
+    return { status: "success", data: data.slice(1).reverse().slice(0, 50) };
+  } catch (e) {
+    return { status: "error", message: e.toString() };
+  }
+}
+
+function getMootaLogs_() {
+  try {
+    const s = ss.getSheetByName("Moota_Logs");
+    if (!s || s.getLastRow() <= 1) return { status: "success", data: [], message: "No moota logs yet" };
+    const data = s.getDataRange().getValues();
+    return { status: "success", data: data.slice(1).reverse().slice(0, 50) };
+  } catch (e) {
+    return { status: "error", message: e.toString() };
+  }
+}
+
+function testEmailDelivery(d) {
+  try {
+    const email = String(d.email || "").trim();
+    if (!email) return { status: "error", message: "Email target wajib diisi" };
+    
+    const cfg = getSettingsMap_();
+    const siteName = getCfgFrom_(cfg, "site_name") || "Sistem Premium";
+    
+    const testHtml = '<div style="font-family: sans-serif; padding: 20px; max-width: 500px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px;">' +
+      '<h2 style="color: #4f46e5;">✅ Test Email Berhasil!</h2>' +
+      '<p>Ini adalah email test dari sistem <b>' + siteName + '</b>.</p>' +
+      '<p><b>Waktu:</b> ' + new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) + '</p>' +
+      '<p><b>Quota Tersisa:</b> ' + MailApp.getRemainingDailyQuota() + ' email</p>' +
+      '<p>Jika Anda menerima email ini, berarti sistem email berfungsi normal.</p>' +
+      '</div>';
+    
+    const result = sendEmail(email, "[TEST] Email Test - " + siteName, testHtml, cfg);
+    return { status: "success", message: "Test email sent", result: result };
+  } catch (e) {
+    return { status: "error", message: e.toString() };
+  }
+}
+
+function testMootaWebhook() {
+  try {
+    const cfg = getSettingsMap_();
+    const orders = mustSheet_("Orders").getDataRange().getValues();
+    
+    // Find a Pending order to simulate
+    var testAmount = 0;
+    var testInv = "";
+    for (var i = orders.length - 1; i >= 1; i--) {
+      if (String(orders[i][7]).trim() === "Pending") {
+        testAmount = toNumberSafe_(orders[i][6]);
+        testInv = orders[i][0];
+        break;
+      }
+    }
+    
+    if (!testAmount) {
+      return { status: "warning", message: "Tidak ada order Pending untuk di-test. Buat order test terlebih dahulu." };
+    }
+    
+    // DRY RUN: simulate matching only, DO NOT actually update status
+    return {
+      status: "success",
+      message: "Dry run - order ditemukan untuk matching",
+      test_data: {
+        invoice: testInv,
+        amount: testAmount,
+        would_match: true,
+        note: "Ini hanya simulasi. Order TIDAK diubah statusnya. Untuk test penuh, kirim webhook asli dari Moota."
+      }
+    };
+  } catch (e) {
+    return { status: "error", message: e.toString() };
+  }
+}
+
+function getSystemHealth() {
+  try {
+    const cfg = getSettingsMap_();
+    const emailQuota = MailApp.getRemainingDailyQuota();
+    
+    // Count pending orders
+    const orders = mustSheet_("Orders").getDataRange().getValues();
+    var pendingCount = 0;
+    var oldPendingCount = 0;
+    for (var i = 1; i < orders.length; i++) {
+      if (String(orders[i][7]).trim() === "Pending") {
+        pendingCount++;
+        var dt = new Date(String(orders[i][8]));
+        if (!isNaN(dt.getTime()) && (Date.now() - dt.getTime()) / 36e5 > 72) {
+          oldPendingCount++;
+        }
+      }
+    }
+    
+    // Check config
+    const mootaToken = getCfgFrom_(cfg, "moota_token");
+    const fonnteToken = getCfgFrom_(cfg, "fonnte_token");
+    
+    // Recent log counts
+    var emailLogCount = 0;
+    var emailFailCount = 0;
+    var emailSheet = ss.getSheetByName("Email_Logs");
+    if (emailSheet && emailSheet.getLastRow() > 1) {
+      var eLogs = emailSheet.getDataRange().getValues();
+      emailLogCount = eLogs.length - 1;
+      for (var j = 1; j < eLogs.length; j++) {
+        if (String(eLogs[j][1]) === "FAILED" || String(eLogs[j][1]) === "QUOTA_EXCEEDED") emailFailCount++;
+      }
+    }
+    
+    var mootaLogCount = 0;
+    var mootaNoMatch = 0;
+    var mootaSheet = ss.getSheetByName("Moota_Logs");
+    if (mootaSheet && mootaSheet.getLastRow() > 1) {
+      var mLogs = mootaSheet.getDataRange().getValues();
+      mootaLogCount = mLogs.length - 1;
+      for (var k = 1; k < mLogs.length; k++) {
+        if (String(mLogs[k][1]) === "NO_MATCH") mootaNoMatch++;
+      }
+    }
+    
+    return {
+      status: "success",
+      health: {
+        email: {
+          quota_remaining: emailQuota,
+          quota_warning: emailQuota < 10,
+          total_logs: emailLogCount,
+          failed_count: emailFailCount
+        },
+        moota: {
+          token_configured: !!mootaToken,
+          total_webhooks: mootaLogCount,
+          unmatched_count: mootaNoMatch
+        },
+        orders: {
+          pending_count: pendingCount,
+          stale_pending: oldPendingCount
+        },
+        integrations: {
+          fonnte_configured: !!fonnteToken,
+          moota_configured: !!mootaToken
+        }
+      }
+    };
+  } catch (e) {
     return { status: "error", message: e.toString() };
   }
 }

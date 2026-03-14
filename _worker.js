@@ -47,11 +47,39 @@ async function handleWebhook(request, gasUrl, token) {
 
     const body = await request.text();
 
-    const response = await fetch(targetUrl.toString(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body
-    });
+    // Retry up to 2 times with timeout
+    let response;
+    let lastError;
+    const MAX_ATTEMPTS = 2;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout
+
+        response = await fetch(targetUrl.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        break; // Success, exit retry loop
+      } catch (err) {
+        lastError = err;
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise(r => setTimeout(r, 1000)); // Wait 1s before retry
+        }
+      }
+    }
+
+    if (!response) {
+      const errMsg = lastError ? String(lastError) : 'All retry attempts failed';
+      return new Response(
+        JSON.stringify({ status: 'error', message: 'GAS unreachable after retries: ' + errMsg }),
+        { status: 502, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
     const resultText = await response.text();
     return new Response(resultText, {
