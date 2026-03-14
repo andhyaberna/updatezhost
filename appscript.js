@@ -200,7 +200,9 @@ function doPost(e) {
       // DIAGNOSTIC & MONITORING ACTIONS
       case "get_email_logs": return jsonRes(getEmailLogs_());
       case "get_moota_logs": return jsonRes(getMootaLogs_());
+      case "get_wa_logs": return jsonRes(getWALogs_());
       case "test_email": return jsonRes(testEmailDelivery(data));
+      case "test_wa": return jsonRes(testWADelivery(data));
       case "get_system_health": return jsonRes(getSystemHealth());
       case "get_email_quota": return jsonRes(getEmailQuotaStatus());
 
@@ -337,24 +339,92 @@ function logMoota_(type, detail) {
   }
 }
 
+function logWA_(status, target, detail) {
+  try {
+    let s = ss.getSheetByName("WA_Logs");
+    if (!s) {
+      s = ss.insertSheet("WA_Logs");
+      s.appendRow(["Timestamp", "Status", "Target", "Detail"]);
+      s.setFrozenRows(1);
+    }
+    s.appendRow([new Date(), status, target, String(detail).substring(0, 500)]);
+    if (s.getLastRow() > 500) s.deleteRows(2, s.getLastRow() - 500);
+  } catch (e) {
+    Logger.log("logWA_ error: " + e);
+  }
+}
+
 /* =========================
    NOTIFICATIONS
 ========================= */
 function sendWA(target, message, cfg) {
-  if (!target) return;
+  if (!target) {
+    logWA_("SKIP", "(empty)", "No target number provided");
+    return { success: false, reason: "no_target" };
+  }
   cfg = cfg || getSettingsMap_();
   const token = getCfgFrom_(cfg, "fonnte_token") || getCfg("fonnte_token");
-  if (!token) return;
-  try {
-    UrlFetchApp.fetch("https://api.fonnte.com/send", {
-      method: "post",
-      headers: { "Authorization": token },
-      payload: { target: target, message: message },
-      muteHttpExceptions: true
-    });
-  } catch (e) {
-    Logger.log(e);
+  if (!token) {
+    logWA_("NO_TOKEN", target, "fonnte_token not configured in Settings");
+    return { success: false, reason: "no_fonnte_token" };
   }
+
+  // Clean target number: remove spaces, ensure no leading 0 issues
+  const cleanTarget = String(target).replace(/\s+/g, "").trim();
+  const MAX_RETRIES = 2;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = UrlFetchApp.fetch("https://api.fonnte.com/send", {
+        method: "post",
+        headers: { "Authorization": token },
+        payload: { target: cleanTarget, message: message },
+        muteHttpExceptions: true
+      });
+
+      const httpCode = res.getResponseCode();
+      const resText = res.getContentText();
+
+      // Validate Fonnte API response
+      if (httpCode >= 200 && httpCode < 300) {
+        try {
+          const resJson = JSON.parse(resText);
+          if (resJson.status === true || resJson.status === "true") {
+            logWA_("SENT", cleanTarget, "OK (attempt " + attempt + ") | Detail: " + String(resJson.detail || resJson.message || "").substring(0, 100));
+            return { success: true };
+          } else {
+            // Fonnte returned 200 but status=false (invalid number, quota, etc)
+            const reason = String(resJson.reason || resJson.detail || resJson.message || "Unknown").substring(0, 200);
+            if (attempt >= MAX_RETRIES) {
+              logWA_("REJECTED", cleanTarget, "Fonnte rejected: " + reason);
+              return { success: false, reason: reason };
+            }
+          }
+        } catch (parseErr) {
+          // Non-JSON response but HTTP 200 - treat as success
+          logWA_("SENT_UNVERIFIED", cleanTarget, "HTTP " + httpCode + " but non-JSON response (attempt " + attempt + ")");
+          return { success: true };
+        }
+      } else {
+        // HTTP error (401, 403, 500, etc)
+        if (attempt >= MAX_RETRIES) {
+          logWA_("HTTP_ERROR", cleanTarget, "HTTP " + httpCode + ": " + resText.substring(0, 200));
+          return { success: false, reason: "HTTP " + httpCode };
+        }
+      }
+
+      // Wait before retry
+      if (attempt < MAX_RETRIES) Utilities.sleep(1000);
+
+    } catch (e) {
+      if (attempt >= MAX_RETRIES) {
+        logWA_("EXCEPTION", cleanTarget, e.toString());
+        return { success: false, reason: e.toString() };
+      }
+      Utilities.sleep(1000);
+    }
+  }
+  return { success: false, reason: "exhausted_retries" };
 }
 
 function sendEmail(target, subject, body, cfg) {
@@ -675,7 +745,7 @@ function updateOrderStatus(d, cfg) {
         if (String(pData[k][0]) === String(pId)) { accessUrl = pData[k][3]; break; }
       }
 
-      sendWA(uWA, `🎉 *PEMBAYARAN TERVERIFIKASI!* 🎉\n\nHalo *${uName}*, kabar baik!\n\nPembayaran Anda untuk produk *${pName}* telah kami terima dan akses Anda kini *Telah Aktif*.\n\n🚀 *Klik link berikut untuk mengakses materi Anda:*\n${accessUrl}\n\nAnda juga bisa mengakses seluruh produk Anda melalui Member Area kami.\n\nTerima kasih atas kepercayaannya!\n*Tim ${siteName}*`, cfg);
+      const waResult = sendWA(uWA, `🎉 *PEMBAYARAN TERVERIFIKASI!* 🎉\n\nHalo *${uName}*, kabar baik!\n\nPembayaran Anda untuk produk *${pName}* telah kami terima dan akses Anda kini *Telah Aktif*.\n\n🚀 *Klik link berikut untuk mengakses materi Anda:*\n${accessUrl}\n\nAnda juga bisa mengakses seluruh produk Anda melalui Member Area kami.\n\nTerima kasih atas kepercayaannya!\n*Tim ${siteName}*`, cfg);
 
       const emailActivationHtml = `
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #334155; border: 1px solid #e2e8f0; border-radius: 10px;">
@@ -695,9 +765,9 @@ function updateOrderStatus(d, cfg) {
           <p style="font-size: 14px; color: #64748b; margin-bottom: 0;">Salam Sukses,<br><b>Tim ${siteName}</b></p>
       </div>
       `;
-      sendEmail(uEmail, `Akses Terbuka! Produk ${pName} - ${siteName}`, emailActivationHtml, cfg);
+      const emailResult = sendEmail(uEmail, `Akses Terbuka! Produk ${pName} - ${siteName}`, emailActivationHtml, cfg);
 
-      return { status: "success" };
+      return { status: "success", notifications: { wa: waResult, email: emailResult } };
     }
 
     return { status: "error", message: "Order tidak ditemukan" };
@@ -1974,9 +2044,8 @@ function getSystemHealth() {
     const mootaToken = getCfgFrom_(cfg, "moota_token");
     const fonnteToken = getCfgFrom_(cfg, "fonnte_token");
     
-    // Recent log counts
-    var emailLogCount = 0;
-    var emailFailCount = 0;
+    // Email log stats
+    var emailLogCount = 0, emailFailCount = 0;
     var emailSheet = ss.getSheetByName("Email_Logs");
     if (emailSheet && emailSheet.getLastRow() > 1) {
       var eLogs = emailSheet.getDataRange().getValues();
@@ -1986,14 +2055,28 @@ function getSystemHealth() {
       }
     }
     
-    var mootaLogCount = 0;
-    var mootaNoMatch = 0;
+    // Moota log stats
+    var mootaLogCount = 0, mootaNoMatch = 0;
     var mootaSheet = ss.getSheetByName("Moota_Logs");
     if (mootaSheet && mootaSheet.getLastRow() > 1) {
       var mLogs = mootaSheet.getDataRange().getValues();
       mootaLogCount = mLogs.length - 1;
       for (var k = 1; k < mLogs.length; k++) {
         if (String(mLogs[k][1]) === "NO_MATCH") mootaNoMatch++;
+      }
+    }
+    
+    // WA log stats
+    var waSentCount = 0, waFailCount = 0, waRejectedCount = 0, waLogCount = 0;
+    var waSheet = ss.getSheetByName("WA_Logs");
+    if (waSheet && waSheet.getLastRow() > 1) {
+      var wLogs = waSheet.getDataRange().getValues();
+      waLogCount = wLogs.length - 1;
+      for (var w = 1; w < wLogs.length; w++) {
+        var wStatus = String(wLogs[w][1]);
+        if (wStatus === "SENT" || wStatus === "SENT_UNVERIFIED") waSentCount++;
+        else if (wStatus === "REJECTED") waRejectedCount++;
+        else if (wStatus === "HTTP_ERROR" || wStatus === "EXCEPTION" || wStatus === "NO_TOKEN") waFailCount++;
       }
     }
     
@@ -2005,6 +2088,13 @@ function getSystemHealth() {
           quota_warning: emailQuota < 10,
           total_logs: emailLogCount,
           failed_count: emailFailCount
+        },
+        whatsapp: {
+          total_logs: waLogCount,
+          sent_count: waSentCount,
+          rejected_count: waRejectedCount,
+          failed_count: waFailCount,
+          sent_rate: waLogCount > 0 ? Math.round((waSentCount / waLogCount) * 100) + "%" : "N/A"
         },
         moota: {
           token_configured: !!mootaToken,
@@ -2021,6 +2111,33 @@ function getSystemHealth() {
         }
       }
     };
+  } catch (e) {
+    return { status: "error", message: e.toString() };
+  }
+}
+
+function getWALogs_() {
+  try {
+    var s = ss.getSheetByName("WA_Logs");
+    if (!s || s.getLastRow() <= 1) return { status: "success", data: [], message: "No WA logs yet" };
+    var data = s.getDataRange().getValues();
+    return { status: "success", data: data.slice(1).reverse().slice(0, 50) };
+  } catch (e) {
+    return { status: "error", message: e.toString() };
+  }
+}
+
+function testWADelivery(d) {
+  try {
+    var target = String(d.target || d.whatsapp || "").trim();
+    if (!target) return { status: "error", message: "Nomor WhatsApp target wajib diisi (parameter: target)" };
+    
+    var cfg = getSettingsMap_();
+    var siteName = getCfgFrom_(cfg, "site_name") || "Sistem Premium";
+    var testMessage = "✅ *TEST WA BERHASIL!*\n\nIni adalah pesan test dari sistem *" + siteName + "*.\n\nWaktu: " + new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) + "\n\nJika Anda menerima pesan ini, berarti koneksi WhatsApp via Fonnte berfungsi normal.";
+    
+    var result = sendWA(target, testMessage, cfg);
+    return { status: "success", message: "Test WA sent to " + target, result: result };
   } catch (e) {
     return { status: "error", message: e.toString() };
   }
