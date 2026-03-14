@@ -1,50 +1,69 @@
+interface Env {
+  MOOTA_GAS_URL: string;
+  MOOTA_TOKEN: string;
+  MOOTA2_GAS_URL: string;
+  MOOTA2_TOKEN: string;
+}
+
 export default {
-  async fetch(request, env, ctx) {
-    // 1. Pastikan Method POST
-    if (request.method !== 'POST') {
-      return new Response('Method Not Allowed', { status: 405 });
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    // Route: /webhook/moota → GAS endpoint A (utama)
+    if (path === '/webhook/moota') {
+      return handleMootaWebhook(request, env.MOOTA_GAS_URL, env.MOOTA_TOKEN);
     }
 
-    // 2. URL Google Apps Script (Pastikan URL ini benar)
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbxJV9gJPLZn46o53RI47AG-L3jpPNUO4Onn6zwfMXHQAMNS8XqrhVNCdTYVw9WONoO7/exec";
-    
-    // Token keamanan tambahan (opsional, tapi ada di URL asli Anda)
-    const SECRET_TOKEN = "FKtBRIlu"; 
-
-    try {
-      // 3. Ambil Signature dari Header Moota
-      const signature = request.headers.get("Signature") || "";
-
-      // 4. Siapkan URL Tujuan dengan Parameter Signature
-      // Kita tempelkan signature sebagai query param agar bisa dibaca oleh GAS (e.parameter.moota_signature)
-      const targetUrl = new URL(GAS_URL);
-      targetUrl.searchParams.append("token", SECRET_TOKEN);
-      targetUrl.searchParams.append("moota_signature", signature);
-
-      // 5. Ambil Body Request (JSON dari Moota)
-      const requestBody = await request.text();
-
-      // 6. Forward Request ke Google Apps Script
-      const response = await fetch(targetUrl.toString(), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json', // Pastikan dikirim sebagai JSON
-        },
-        body: requestBody
-      });
-
-      // 7. Kembalikan Response dari GAS ke Moota
-      const resultText = await response.text();
-      return new Response(resultText, {
-        status: response.status,
-        headers: { 'Content-Type': 'application/json' }
-      });
-
-    } catch (error) {
-      return new Response(JSON.stringify({ status: "error", message: String(error) }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      });
+    // Route: /webhook/moota2 → GAS endpoint B (sebelumnya worker terpisah)
+    if (path === '/webhook/moota2') {
+      return handleMootaWebhook(request, env.MOOTA2_GAS_URL, env.MOOTA2_TOKEN);
     }
-  },
+
+    // Fallback — biarkan Cloudflare Pages handle static assets
+    return new Response('Not Found', { status: 404 });
+  }
 };
+
+/**
+ * Forward POST request dari Moota ke Google Apps Script.
+ * Menyertakan Signature header sebagai query param agar bisa dibaca oleh GAS.
+ */
+async function handleMootaWebhook(
+  request: Request, gasUrl: string, token: string
+): Promise<Response> {
+  // Hanya terima POST
+  if (request.method !== 'POST') {
+    return new Response(
+      JSON.stringify({ status: 'error', message: 'Method Not Allowed' }),
+      { status: 405, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  try {
+    const signature = request.headers.get('Signature') || '';
+
+    const targetUrl = new URL(gasUrl);
+    targetUrl.searchParams.append('token', token);
+    targetUrl.searchParams.append('moota_signature', signature);
+
+    const body = await request.text();
+
+    const response = await fetch(targetUrl.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body
+    });
+
+    const resultText = await response.text();
+    return new Response(resultText, {
+      status: response.status,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error) {
+    return new Response(
+      JSON.stringify({ status: 'error', message: String(error) }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+}
