@@ -1,12 +1,7 @@
 // Cloudflare Pages Function — handles POST /webhook/moota2
 // Forwards Moota webhook to Google Apps Script endpoint B
 
-interface Env {
-  MOOTA2_GAS_URL: string;
-  MOOTA2_TOKEN: string;
-}
-
-export const onRequestPost: PagesFunction<Env> = async (context) => {
+export async function onRequestPost(context) {
   const { request, env } = context;
 
   try {
@@ -35,4 +30,4 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
-};
+}
