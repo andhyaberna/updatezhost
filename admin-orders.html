@@ -244,9 +244,10 @@
     </div>
 
     <script>
-        // CONFIGURATION — Loaded from encrypted config.js
-        const API_URL = (typeof SCRIPT_URL !== 'undefined') ? SCRIPT_URL : null;
-        if (!API_URL) { console.warn('[Config] SCRIPT_URL belum tersedia dari config.js'); }
+        // CONFIGURATION — Dynamic lookup from encrypted config.js
+        function getApiUrl() {
+            return window.SCRIPT_URL || (typeof SCRIPT_URL !== 'undefined' ? SCRIPT_URL : null);
+        }
         let currentPage = 1;
         let currentData = [];
         let isEditing = false;
@@ -274,10 +275,14 @@
 
         // FETCH ORDERS (READ)
         async function fetchOrders(page, search = "") {
+            const API_URL = getApiUrl();
+            if (!API_URL) {
+                console.error('[Config] SCRIPT_URL tidak tersedia');
+                Swal.fire('Error', 'Konfigurasi API belum siap. Pastikan config.js termuat. Coba refresh.', 'error');
+                return;
+            }
             setLoading(true);
             try {
-                // Use fetch with NO-CORS mode limitation workaround via 'text/plain' body if needed
-                // But for standard Web Apps with CORS enabled, this should work.
                 const res = await fetch(API_URL, {
                     method: 'POST',
                     body: JSON.stringify({
@@ -456,7 +461,7 @@
 
             setLoading(true);
             try {
-                const res = await fetch(API_URL, {
+                const res = await fetch(getApiUrl(), {
                     method: 'POST',
                     body: JSON.stringify(payload)
                 });
@@ -489,7 +494,7 @@
                 if (result.isConfirmed) {
                     setLoading(true);
                     try {
-                        const res = await fetch(API_URL, {
+                        const res = await fetch(getApiUrl(), {
                             method: 'POST',
                             body: JSON.stringify({
                                 action: 'delete_order',
