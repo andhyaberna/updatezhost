@@ -204,6 +204,7 @@ function doPost(e) {
       case "test_email": return jsonRes(testEmailDelivery(data));
       case "test_wa": return jsonRes(testWADelivery(data));
       case "test_lunas_notification": return jsonRes(testLunasNotification(data));
+      case "run_unit_tests": return jsonRes(runUnitTests_());
       case "get_system_health": return jsonRes(getSystemHealth());
       case "get_email_quota": return jsonRes(getEmailQuotaStatus());
 
@@ -366,14 +367,34 @@ function logWA_(status, target, detail) {
  */
 function normalizePhone_(raw) {
   if (!raw) return "";
-  // Remove all non-digit characters (+, -, spaces, parens, etc)
-  let num = String(raw).replace(/[^0-9]/g, "");
+  let s = String(raw).trim();
+  if (/e[+-]?\d+/i.test(s)) {
+    const n = Number(s);
+    if (isFinite(n)) s = Utilities.formatString("%.0f", n);
+  } else if (typeof raw === "number" && isFinite(raw)) {
+    s = Utilities.formatString("%.0f", raw);
+  }
+  let num = s.replace(/[^0-9]/g, "");
   // Handle country code prefix
   if (num.startsWith("620")) num = num.substring(3); // 6208xxx → 8xxx
   else if (num.startsWith("62")) num = num.substring(2); // 628xxx → 8xxx
   // Remove leading 0 if present
   if (num.startsWith("0")) num = num.substring(1); // 08xxx → 8xxx
   return num;
+}
+
+function validateWATarget_(target) {
+  const cleanTarget = normalizePhone_(target);
+  if (!cleanTarget || cleanTarget.length < 9) {
+    return {
+      ok: false,
+      clean: cleanTarget,
+      reason: "invalid_phone_number",
+      raw: target,
+      raw_type: typeof target
+    };
+  }
+  return { ok: true, clean: cleanTarget };
 }
 
 function sendWA(target, message, cfg) {
@@ -388,12 +409,12 @@ function sendWA(target, message, cfg) {
     return { success: false, reason: "no_fonnte_token" };
   }
 
-  // Normalize phone number: strip all non-digits, handle prefix
-  const cleanTarget = normalizePhone_(target);
-  if (!cleanTarget || cleanTarget.length < 9) {
-    logWA_("INVALID_NUMBER", String(target), "After normalization: '" + cleanTarget + "' (too short or empty)");
-    return { success: false, reason: "invalid_phone_number" };
+  const validation = validateWATarget_(target);
+  if (!validation.ok) {
+    logWA_("INVALID_NUMBER", String(target), "After normalization: '" + String(validation.clean || "") + "' (too short or empty) | rawType=" + typeof target);
+    return { success: false, reason: validation.reason };
   }
+  const cleanTarget = validation.clean;
 
   const MAX_RETRIES = 2;
 
@@ -1732,11 +1753,12 @@ function handleMootaWebhook(mutations, cfg) {
           logWA_("DEBUG_MOOTA_LUNAS", String(uWA), "raw=" + JSON.stringify(uWA) + " type=" + typeof uWA + " normalized=" + normalizePhone_(uWA) + " | Inv=" + inv);
 
           // A) WA Customer
-          sendWA(
+          const waCustomerResult = sendWA(
             uWA,
             `🎉 *PEMBAYARAN DITERIMA!* 🎉\n\nHalo *${uName}*, pembayaran Anda sebesar Rp ${Number(nominalTransfer).toLocaleString('id-ID')} telah berhasil diverifikasi otomatis.\n\nPesanan *${pName}* (Invoice: #${inv}) kini *AKTIF*.\n\n🚀 *AKSES MATERI:* \n${accessUrl}\n\nTerima kasih!\n*Tim ${siteName}*`,
             cfg
           );
+          logMoota_("WA_CUSTOMER", "Inv=" + inv + " result=" + JSON.stringify(waCustomerResult).substring(0, 300));
 
           // B) Email Customer
           const emailHtml = `
@@ -1753,11 +1775,12 @@ function handleMootaWebhook(mutations, cfg) {
           sendEmail(uEmail, `Pembayaran Sukses: #${inv} - ${siteName}`, emailHtml, cfg);
 
           // C) WA Admin
-          sendWA(
+          const waAdminResult = sendWA(
             adminWA,
             `💰 *MOOTA PAYMENT RECEIVED* 💰\n\nInv: #${inv}\nAmt: Rp ${Number(nominalTransfer).toLocaleString('id-ID')}\nUser: ${uName}\nProduk: ${pName}\n\nStatus: Auto-Lunas by System.`,
             cfg
           );
+          logMoota_("WA_ADMIN", "Inv=" + inv + " result=" + JSON.stringify(waAdminResult).substring(0, 300));
 
           foundMatch = true;
           matched.push(inv);
@@ -2000,6 +2023,47 @@ function getAdminUsers(d) {
 /* =========================
    DIAGNOSTIC & TEST FUNCTIONS
 ========================= */
+function runUnitTests_() {
+  const results = [];
+  let passed = 0;
+  let failed = 0;
+
+  function record(name, ok, detail) {
+    results.push({ name, ok: !!ok, detail: detail || "" });
+    if (ok) passed++; else failed++;
+  }
+
+  function eq(name, actual, expected) {
+    const ok = String(actual) === String(expected);
+    record(name, ok, ok ? "" : ("expected=" + JSON.stringify(expected) + " actual=" + JSON.stringify(actual)));
+  }
+
+  function truthy(name, value) {
+    record(name, !!value, value ? "" : ("value=" + JSON.stringify(value)));
+  }
+
+  eq("normalize 08xxx", normalizePhone_("0812 3456 7890"), "81234567890");
+  eq("normalize +62", normalizePhone_("+62 812-3456-7890"), "81234567890");
+  eq("normalize 62", normalizePhone_("6281234567890"), "81234567890");
+  eq("normalize with apostrophe", normalizePhone_("'0812-3456-7890"), "81234567890");
+  eq("normalize sci notation string", normalizePhone_("8.12345678901E+11"), "812345678901");
+
+  const v1 = validateWATarget_("081234567890");
+  truthy("validate ok", v1.ok);
+  eq("validate clean", v1.clean, "81234567890");
+
+  const paidOrderLike = {
+    status_pembayaran: "Lunas",
+    harga: 150000,
+    wa: "8.12345678901E+11"
+  };
+  const v2 = validateWATarget_(paidOrderLike.wa);
+  truthy("paid>0 lunas wa ok", v2.ok);
+  truthy("paid>0 lunas wa length", v2.clean && v2.clean.length >= 9);
+
+  return { status: "success", passed, failed, results };
+}
+
 function getEmailLogs_() {
   try {
     const s = ss.getSheetByName("Email_Logs");
